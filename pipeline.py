@@ -177,35 +177,36 @@ class DocumentPipeline:
 
     # ── PDF-level processing ────────────────────────────────────────
 
-    def process_pdf(self, pdf_path: Path) -> int:
+    def process_pdf(self, pdf_path: Path) -> List[tuple]:
         """
-        Process one PDF file: split into pages, then process each page.
-        Returns the number of successfully processed pages.
+        Split a PDF into pages and return (page_path, original_filename) tuples.
+        Splitting is fast local disk I/O — done upfront before any API calls.
         """
-        logger.info(f"{'─' * 60}")
-        logger.info(f"Processing: {pdf_path.name}")
-
+        logger.info(f"Splitting: {pdf_path.name}")
         pages = self.processor.split_pdf(pdf_path)
-        logger.info(f"  {len(pages)} page(s)")
-
-        successes = 0
-        for i, page in enumerate(pages, 1):
-            logger.info(f"  Page {i}/{len(pages)}")
-            if self._process_single_page(page, pdf_path.name):
-                successes += 1
-
-        return successes
+        logger.info(f"  {pdf_path.name} → {len(pages)} page(s)")
+        return [(page, pdf_path.name) for page in pages]
 
     # ── Directory-level processing ──────────────────────────────────
 
     def run(self, input_dir: Optional[str] = None) -> Dict:
         """
         Process every PDF in the input directory.
-        
-        Uses ThreadPoolExecutor for concurrent PDF-level processing.
-        Each PDF is processed sequentially internally (pages depend on
-        the split step) but multiple PDFs run in parallel.
-        
+
+        Strategy:
+          1. Split all PDFs into individual pages (fast, sequential, disk I/O only)
+          2. Submit every page as its own task to a flat thread pool
+             so max_workers controls total concurrency across all pages
+             from all PDFs simultaneously — not just across PDFs.
+
+        This means a single 10-page PDF uses all 4 workers in parallel
+        rather than tying up 1 thread while 3 sit idle.
+
+        max_workers acts as the natural API rate-limit cap:
+          - laptop/debug:    1-2 workers
+          - desktop/team:    4-6 workers
+          - server/prod:     8-10 workers  (Claude API rpm becomes the ceiling)
+
         Returns:
             Summary statistics dict
         """
@@ -216,20 +217,28 @@ class DocumentPipeline:
         pdfs = sorted(src.glob("*.pdf"))
         logger.info(f"Found {len(pdfs)} PDF(s) in {src}")
 
-        if self.cfg.max_workers <= 1 or len(pdfs) <= 1:
-            # Sequential processing
-            for pdf in pdfs:
-                self.process_pdf(pdf)
+        # Phase 1: split all PDFs — collect every (page_path, original_pdf) pair
+        all_pages: List[tuple] = []
+        for pdf in pdfs:
+            all_pages.extend(self.process_pdf(pdf))
+        logger.info(f"Total pages to process: {len(all_pages)}")
+
+        # Phase 2: process all pages concurrently across the flat pool
+        if self.cfg.max_workers <= 1:
+            for page_path, original_filename in all_pages:
+                self._process_single_page(page_path, original_filename)
         else:
-            # Concurrent processing
             with ThreadPoolExecutor(max_workers=self.cfg.max_workers) as pool:
-                futures = {pool.submit(self.process_pdf, p): p for p in pdfs}
+                futures = {
+                    pool.submit(self._process_single_page, page, orig): (page, orig)
+                    for page, orig in all_pages
+                }
                 for future in as_completed(futures):
-                    pdf = futures[future]
+                    page, orig = futures[future]
                     try:
                         future.result()
                     except Exception as exc:
-                        logger.error(f"Failed to process {pdf.name}: {exc}")
+                        logger.error(f"Failed to process {page.name}: {exc}")
 
         # Clean up temp pages
         temp = Path(self.cfg.temp_dir)
