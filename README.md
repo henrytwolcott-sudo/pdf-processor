@@ -107,7 +107,7 @@ cfg = PipelineConfig(
     output_dir="./results",
     glyph_ratio_threshold=0.25,   # more aggressive glyph detection
     force_ocr=False,              # True to always use Tesseract
-    max_workers=4,                # concurrent PDF processing
+    max_workers=4,                # concurrent pages (across all PDFs)
     confidence_threshold=0.80,    # stricter classification
     max_retries=3,                # API retry attempts
 )
@@ -146,8 +146,7 @@ Adding a new type takes ~20 minutes: add a schema to `config.py` and update the 
 │   └── architecture.ipynb  # Design decisions & scaling
 │
 ├── requirements.txt
-├── .env.example
-└── PERSONAL_README.md      # Detailed design notes
+└── .env.example
 ```
 
 ---
@@ -160,7 +159,7 @@ Adding a new type takes ~20 minutes: add a schema to `config.py` and update the 
 | OCR | Tesseract 5 | Scanned, glyph, and hybrid PDFs |
 | LLM | Claude API (Anthropic) | Classification & structured extraction |
 | Language | Python 3.11 | Core logic |
-| Concurrency | ThreadPoolExecutor | Parallel PDF processing |
+| Concurrency | ThreadPoolExecutor | Parallel page-level processing |
 
 ---
 
