@@ -1,0 +1,6 @@
+PERSONAL_README.md
+__pycache__/
+*.pyc
+.env
+*.csv
+temp_pages/
