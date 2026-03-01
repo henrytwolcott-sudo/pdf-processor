@@ -165,12 +165,14 @@ Adding a new type takes ~20 minutes: add a schema to `config.py` and update the 
 
 ## Token Optimisation
 
+PyMuPDF and Tesseract are free — they run locally on your machine. Only Claude costs tokens. Every optimisation below is about reducing what gets sent to Claude.
+
 | Strategy | Impact |
 |----------|--------|
-| Glyph detection routes bad text to OCR | Prevents garbage tokens to LLM |
-| Text extraction before vision API | Text calls ~10x cheaper than image |
-| Separate classify/extract with tight max_tokens | Avoids over-generation |
-| Type-specific schemas | Only relevant fields per call |
+| Glyph detection routes bad text through OCR first | Prevents sending garbage characters to Claude |
+| Text extraction before vision fallback | Sending text to Claude is ~10x cheaper than sending a base64 image |
+| Separate classify/extract calls with tight max_tokens | Avoids over-generation on each call |
+| Type-specific schemas | Claude only extracts fields relevant to the document type |
 
 ---
 
